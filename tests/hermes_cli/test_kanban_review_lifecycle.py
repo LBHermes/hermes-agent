@@ -41,6 +41,15 @@ def kanban_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    # These tests exercise scheduling with capable workers; missing pins have separate controls.
+    from hermes_cli.profiles import get_profile_dir
+    for profile in ['builder', 'dev', 'reviewer', 'reviewer-a', 'worker']:
+        for skill in ['sdlc-review', 'domain-specific-review']:
+            folder = get_profile_dir(profile) / "skills" / skill
+            folder.mkdir(parents=True)
+            (folder / "SKILL.md").write_text(
+                f"---\nname: {skill}\ndescription: Test skill.\n---\nInstructions.\n",
+            )
     kb.init_db()
     return home
 

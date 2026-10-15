@@ -1467,3 +1467,22 @@ Every transition appends a row to `task_events`. Each row carries an optional `r
 ## Out of scope
 
 Kanban is deliberately single-host. `~/.hermes/kanban.db` is a local SQLite file and the dispatcher spawns workers on the same machine. Running a shared board across two hosts is not supported — there's no coordination primitive for "worker X on host A, worker Y on host B," and the crash-detection path assumes PIDs are host-local. If you need multi-host, run an independent board per host and use `delegate_task` / a message queue to bridge them.
+
+### Human gates and dispatch requirements
+
+`kanban.profile_notification_targets` and `kanban.global_notification_targets`
+map profile names to `platform:chat_id` destinations. Human blocks (`needs_input`,
+`capability`, or a card created blocked) subscribe the destination before the block
+is consumed by the notifier. Routing prefers the assignee, then
+`kanban.orchestrator_profile`, then a sole global destination. Existing cursors are
+preserved; the notifier profile is the owner of the selected destination.
+
+Before claiming a card, dispatch resolves its pinned skills in the assignee's home.
+Missing or disabled skills park it with `block_kind: capability` and a
+`pinned_skill_missing` event, without charging an attempt. The review lane also
+requires `sdlc-review`, which the curator protects from archival.
+
+Respawn guard decisions are still evaluated every tick. The ledger records entry
+once, updates `repeats` and `last_seen_at` while held, and records
+`respawn_guard_released` when the hold ends. New guard transition rows are capped
+at six per task per hour; historical events are retained.

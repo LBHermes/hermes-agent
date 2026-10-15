@@ -37,7 +37,7 @@ _VALID_STATES = {STATE_ACTIVE, STATE_STALE, STATE_ARCHIVED}
 
 # Load-bearing built-ins (by frontmatter ``name``) the curator must NEVER archive/consolidate regardless of
 # ``curator.prune_builtins``, pins or LLM judgment — archiving one breaks its slash command. Keep tiny.
-PROTECTED_BUILTIN_SKILLS: set[str] = set()
+PROTECTED_BUILTIN_SKILLS: set[str] = {"sdlc-review"}
 
 
 def is_protected_builtin(skill_name: str) -> bool:

@@ -2093,19 +2093,17 @@ def _dispatch_lane_task(
         if current >= per_profile_cap:
             result.skipped_per_profile_capped.append((task_id, assignee, current))
             return False
+    from hermes_cli.kanban_guard_events import apply_guard_event
+    from hermes_cli.kanban_pinned_skills import refuse_missing_pins, forced_review_skills
     guard_reason = check_respawn_guard(conn, task_id, lane=lane)
+    if not dry_run:
+        apply_guard_event(conn, task_id, guard_reason)
     if guard_reason is not None:
         result.respawn_guarded.append((task_id, guard_reason))
-        # Event so ``hermes kanban tail`` shows why the task looks stuck.
-        # Honour kanban.default_assignee: when the dispatcher hits an unassigned ready task and an
-        # operator-configured fallback exists, persist the assignment and proceed. This removes the
-        # dashboard footgun where a task created without an assignee parks in 'ready' forever even though
-        # the operator's intent ("default") was perfectly clear (#27145). Mutating the row (not just the
-        # in-memory view) keeps diagnostics and the board state consistent: the task is now legitimately
-        # owned by ``kanban.default_assignee``, not "unassigned but secretly routed".
-        if not dry_run:
-            with _kb.write_txn(conn):
-                _kb._append_event(conn, task_id, "respawn_guarded", {"reason": guard_reason})
+        return False
+
+    if refuse_missing_pins(conn, row, assignee, lane, dry_run=dry_run):
+        result.auto_blocked.append(task_id)
         return False
 
     def _count_spawn(name: str) -> None:
@@ -2142,7 +2140,7 @@ def _dispatch_lane_task(
     if lane == "review":
         # Force-load sdlc-review; the kanban lifecycle is already in every
         # worker's system prompt via KANBAN_GUIDANCE.
-        claimed.skills = list(dict.fromkeys([*(claimed.skills or []), "sdlc-review"]))
+        claimed.skills = list(dict.fromkeys([*(claimed.skills or []), *forced_review_skills(lane)]))
     try:
         pid = _call_spawn_fn(spawn_fn if spawn_fn is not None else _default_spawn, claimed, str(workspace), board)
         if pid:

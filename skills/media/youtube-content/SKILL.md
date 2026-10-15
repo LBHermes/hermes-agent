@@ -83,7 +83,7 @@ After fetching the transcript, format it based on what the user asks for:
 ## Workflow
 
 1. **Fetch** the transcript using `terminal` and the prepared Python with `--text-only --timestamps`.
-2. **Validate**: confirm the output is non-empty and in the expected language. If empty, retry without `--language` to get any available transcript. If still empty, tell the user the video likely has transcripts disabled.
+2. **Validate**: confirm the output is non-empty and in the expected language. If empty, retry without `--language` to get any available transcript. If still empty, report that no transcript was returned. Check the exit code: exit 3 identifies a host block, not disabled subtitles.
 3. **Chunk if needed**: if the transcript exceeds ~50K characters, split into overlapping chunks (~40K with 2K overlap) and summarize each chunk before merging.
 4. **Transform** into the requested output format. If the user did not specify a format, default to a summary.
 5. **Verify**: re-read the transformed output to check for coherence, correct timestamps, and completeness before presenting.
@@ -94,3 +94,7 @@ After fetching the transcript, format it based on what the user asks for:
 - **Private/unavailable video**: relay the error and ask the user to verify the URL.
 - **No matching language**: retry without `--language` to fetch any available transcript, then note the actual language to the user.
 - **Dependency missing**: repeat PM preparation and reactivation above, then verify the helper uses that Python. Do not repair the selected generation with pip.
+
+A host-level refusal returns exit 3 with `blocked_by: youtube_host_block` and
+`attributed_to: host` (stderr with `--text-only`). Change network or use an
+authorized proxy before retrying; video/dependency failures return exit 1.

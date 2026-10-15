@@ -73,6 +73,15 @@ def fetch_transcript(video_id: str, languages: list | None = None):
     ]
 
 
+def is_host_block(error: Exception) -> bool:
+    """Classify by API exception type; video failures can have similar messages."""
+    try:
+        from youtube_transcript_api._errors import RequestBlocked, IpBlocked
+    except ImportError:
+        return False
+    return isinstance(error, (RequestBlocked, IpBlocked))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fetch YouTube transcript as JSON")
     parser.add_argument("url", help="YouTube URL or video ID")
@@ -90,6 +99,15 @@ def main():
     try:
         segments = fetch_transcript(video_id, languages)
     except Exception as e:
+        if is_host_block(e):
+            failure = {
+                "error": "YouTube blocked transcript requests from this host.",
+                "blocked_by": "youtube_host_block",
+                "attributed_to": "host",
+                "remedy": "Use another network or an authorized proxy; trying other videos on this host will not resolve the block.",
+            }
+            print(json.dumps(failure), file=sys.stderr if args.text_only else sys.stdout)
+            sys.exit(3)
         error_msg = str(e)
         if "disabled" in error_msg.lower():
             print(json.dumps({"error": "Transcripts are disabled for this video."}))

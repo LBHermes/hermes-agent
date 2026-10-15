@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Union
 
 from hermes_cli.middleware import OBSERVER_SCHEMA_VERSION
+from hermes_cli.plugins_fail_closed import declared, withhold, run_screen, arun_screen
 
 logger = logging.getLogger("hermes_cli.plugins")
 
@@ -268,9 +269,15 @@ class PluginDispatchMixin:
         fail_closed = hook_name in _HOOK_TIMEOUT_FAIL_CLOSED_HOOKS
         for cb in self._hooks.get(hook_name, []):
             try:
-                if use_timeout:
+                if declared(cb) and hook_name == "transform_tool_result":
+                    ret, withheld = run_screen(self, hook_name, cb, kwargs, timeout if use_timeout else _HOOK_CALLBACK_TIMEOUT_SECS)
+                    if withheld:
+                        return [ret]
+                elif use_timeout:
                     ret = self._run_hook_callback_bounded(hook_name, cb, kwargs, timeout)
                     if ret is _HOOK_SKIPPED:
+                        if declared(cb) and hook_name == "transform_tool_result":
+                            return [withhold()]
                         if fail_closed:  # policy hook: fail closed with a block directive
                             results.append({"action": "block", "message": _PRE_TOOL_CALL_TIMEOUT_BLOCK_MESSAGE})
                         continue
@@ -280,6 +287,8 @@ class PluginDispatchMixin:
                     results.append(ret)
             except (Exception, SystemExit) as exc:
                 self._report_hook_failure(hook_name, cb, kwargs, exc)
+                if declared(cb) and hook_name == "transform_tool_result":
+                    return [withhold()]
                 if fail_closed:  # a guard that raised made no decision: same veto as a timeout
                     results.append(_policy_error_block_directive(hook_name, cb, exc))
         return results
@@ -319,7 +328,7 @@ class PluginDispatchMixin:
         # Suppression is a fact about the CALLBACK — a hung one must keep its back-off —
         # so that key stays coarse. The gate must instead tell CONCURRENT CALLS apart.
         suppression_key = (hook_name, id(cb))
-        gate_key = (*suppression_key, _hook_call_identity(kwargs))
+        gate_key = (*suppression_key, _hook_call_identity(kwargs) or object())
         token = object()
         with self._hook_timeout_lock:
             suppressed_until = self._hook_timeout_suppressed_until.get(suppression_key)
@@ -546,19 +555,28 @@ class PluginDispatchMixin:
         for cb in self._hooks.get(hook_name, []):
             callback_name = getattr(cb, "__name__", repr(cb))
             try:
-                ret = cb(**self._hook_callback_kwargs(cb, kwargs))
-                if inspect.isawaitable(ret):
-                    ret = await (asyncio.wait_for(ret, timeout) if use_timeout else ret)
+                if declared(cb) and hook_name == "transform_tool_result":
+                    ret, withheld = await arun_screen(self, hook_name, cb, kwargs, timeout if use_timeout else _HOOK_CALLBACK_TIMEOUT_SECS)
+                    if withheld:
+                        return [ret]
+                else:
+                    ret = cb(**self._hook_callback_kwargs(cb, kwargs))
+                    if inspect.isawaitable(ret):
+                        ret = await (asyncio.wait_for(ret, timeout) if use_timeout else ret)
                 if ret is not None:
                     results.append(ret)
             except TimeoutError:
                 logger.warning("Hook '%s' callback %s timed out after %.0fs", hook_name, callback_name, timeout)
+                if declared(cb) and hook_name == "transform_tool_result":
+                    return [withhold()]
                 if fail_closed:  # policy hook: fail closed with a block directive
                     results.append({"action": "block", "message": _PRE_TOOL_CALL_TIMEOUT_BLOCK_MESSAGE})
             except (Exception, SystemExit) as exc:
                 # Same isolation + failure contract as the sync path (#111922 warn-once, #109624
                 # a raising policy guard fails closed).
                 self._report_hook_failure(hook_name, cb, kwargs, exc)
+                if declared(cb) and hook_name == "transform_tool_result":
+                    return [withhold()]
                 if fail_closed:
                     results.append(_policy_error_block_directive(hook_name, cb, exc))
         return results

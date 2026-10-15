@@ -210,6 +210,20 @@ _COMMON_HELPERS = '''\
 # Convenience helpers (avoid common scripting pitfalls)
 # ---------------------------------------------------------------------------
 
+def _parse_rpc_response(raw):
+    """A screening hook may replace the JSON body with a plain-text notice."""
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return result
+    return result
+
+
 def json_parse(text: str):
     """Parse JSON tolerant of control characters and UTF-8 BOM (strict=False).
     Use this instead of json.loads() when parsing output from terminal()
@@ -319,14 +333,8 @@ def _call(tool_name, args):
                 _sock = None
                 if _attempt + 1 >= _attempts:
                     raise
-    raw = buf.decode().strip()
-    result = json.loads(raw)
-    if isinstance(result, str):
-        try:
-            return json.loads(result)
-        except (json.JSONDecodeError, TypeError):
-            return result
-    return result
+    raw = buf.decode().removesuffix("\\n")
+    return _parse_rpc_response(raw)
 
 '''
 
@@ -389,13 +397,7 @@ def _call(tool_name, args):
     except OSError:
         pass
 
-    result = json.loads(raw)
-    if isinstance(result, str):
-        try:
-            return json.loads(result)
-        except (json.JSONDecodeError, TypeError):
-            return result
-    return result
+    return _parse_rpc_response(raw)
 
 '''
 
