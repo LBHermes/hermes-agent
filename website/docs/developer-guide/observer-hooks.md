@@ -343,3 +343,23 @@ explicit file selected with `HERMES_NEMO_RELAY_PLUGINS_TOML`, can add
 [ATOF, ATIF, or OTEL](https://docs.nvidia.com/nemo/relay/configure-plugins/observability/about)
 exporters and execution middleware; see
 [Relay shared metrics](relay-shared-metrics.md).
+
+### Opt-in fail-closed result screening
+
+A screening plugin can register
+`ctx.register_hook("transform_tool_result", screen, fail_closed=True)`.
+The declaration belongs to that registration and is removed when its handle is
+disposed. Unsupported hook names reject the declaration; `pre_tool_call` already
+has a blocking failure contract.
+
+A failed or skipped declared result screener retries at most twice within a
+45-second budget. Retries wait at most five seconds for abandoned workers, and
+never discard live worker accounting. Exhaustion returns a withholding notice
+before any other replacement result and records tool name, byte count, reason,
+and attempt count in `<HERMES_HOME>/logs/hook_withholds.jsonl`, without the payload.
+A ledger failure does not release the result.
+
+After repairing a hung callback, create `<HERMES_HOME>/hook_fail_closed_release`
+and retry with a new tool call. The marker is consumed once, allows screening to
+resume despite suppression, and preserves the existing abandoned-worker cap.
+It cannot make a still-running worker disappear or bypass a saturated worker cap.
